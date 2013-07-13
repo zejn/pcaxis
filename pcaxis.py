@@ -10,14 +10,42 @@ axis_parser.parseFile(open(fn))
 or run with python axis.py <dataset>
 """
 
+import codecs
 import pyparsing
 from pyparsing import Keyword, Word, alphas, nums, alphanums, Regex, Literal, OneOrMore, Suppress, Group, Dict, Optional, White
 
-def parseData(s):
+def parseDataLine(line, struct_len):
+	dline2 = []
+	
+	total = 1
+	for i in struct_len:
+		total = total * i
+	assert total == len(line), 'Line has extra elements?'
+	
+	struct2 = list(reversed(struct_len))
+	
+	def divide(elements, substruct):
+		
+		if len(substruct) == 1:
+			yield elements
+		else:
+			n = float(len(elements)) / substruct[0]
+			assert int(n) == n, 'Should be integer'
+			n = int(n)
+			for i in xrange(substruct[0]):
+				yield elements[i*n:(i+1)*n]
+		
+	
+	return list(divide(line, struct2))
+
+def parseData(d, structure):
 	lines = []
 	cur = 0
-	d = s[0]
 	total = len(d)
+	
+	#print structure
+	struct_len = [len(i) for i in structure]
+	struct_len.reverse()
 	
 	data_array = []
 	dline = []
@@ -43,7 +71,11 @@ def parseData(s):
 			while d[cur] in '\r\n':
 				cur += 1
 			#print dline
-			data_array.append(dline)
+			# parse dline
+			
+			dline2 = parseDataLine(dline, struct_len)
+			
+			data_array.append(dline2)
 			dline = []
 	return data_array
 
@@ -81,7 +113,7 @@ copyright = Keyword("COPYRIGHT") + EQUAL + (YES | NO) + SEMI
 creation_date = Keyword("CREATION-DATE") + EQUAL + DATE + SEMI
 
 DATA_VALUES = Regex('[^;]+')
-DATA_VALUES.setParseAction(parseData)
+#DATA_VALUES.setParseAction(parseData)
 data = Keyword("DATA") + EQUAL + Optional(Suppress(White())) + DATA_VALUES + SEMI
 
 database = Keyword("DATABASE") + EQUAL + QSTRING + SEMI
@@ -123,7 +155,7 @@ variable_type = Keyword("VARIABLE-TYPE") + BPAREN + QSTRING + EPAREN + EQUAL + Q
 
 
 
-axis_parser = OneOrMore(
+pcaxis_parser = OneOrMore(
 	Group(axis_version("AXIS-VERSION")) | \
 	Group(charset("CHARSET")) | \
 	Group(codes("CODES")) | \
@@ -172,6 +204,51 @@ axis_parser = OneOrMore(
 	)
 
 
+def parsePX(data, encoding=None):
+    parseresults = pcaxis_parser.parseString(data)
+
+    if encoding is None:
+        # detect encoding
+        for item in parseresults:
+            if item[0] == 'CHARSET':
+                encoding = item[1]
+                try:
+                    c = codecs.lookup(encoding)
+                except LookupError:
+                    raise ValueError('Invalid encoding, please set charset manually by passing encoding parameter to parsePX', encoding)
+
+    parsed_data = {}
+    structure = []
+    for item in parseresults:
+        key = item[0]
+        if key in ['LANGUAGE', 'CHARSET', 'AXIS-VERSION', 'CREATION-DATE',
+            'SUBJECT-AREA', 'SUBJECT-CODE', 'DESCRIPTION', 'LAST-UPDATED',
+            'SOURCE', 'CONTACT', 'MATRIX', 'TITLE', 'CONTENTS', 'UNITS',
+            'STUB', 'DATASYMBOL1', 'DATASYMBOL2', 'DATASYMBOL3', 'DATASYMBOL4',
+            'COPYRIGHT', 'DATABASE']:
+            assert len(item) == 2
+            parsed_data[key] = item[1].decode(encoding)
+        elif key in ['DECIMALS']:
+            parsed_data[key] = item[1]
+        elif key in ['CODES']:
+            codes = parsed_data.setdefault(key, {})
+            structure.append(tuple(item[2]))
+            codes[item[1]] = tuple(item[2])
+        elif key in ['VALUES']:
+            codes = parsed_data.setdefault(key, {})
+            codes[item[1]] = [i.decode(encoding) for i in tuple(item[2])]
+        elif key in ['NOTEX', 'NOTE']:
+            parsed_data[key] = ''.join(item[1:])
+        elif key == 'DATA':
+            pdata = parseData(item[1], structure)
+            #print pdata
+            parsed_data[key] = pdata
+        else:
+            print item[0], len(item)
+        
+    
+    return parsed_data
+
 
 if __name__ == "__main__":
 	
@@ -191,7 +268,7 @@ TIMEVAL("MESEC")=TLIST(M1,"200801"-"201108");"""
 	outfile = hasattr(sys, 'pypy_version_info') and 'pypy' or 'cpython'
 	fn = sys.argv[1]
 	d = open(fn).read()
-	result = axis_parser.parseString(d)
+	result = pcaxis_parser.parseString(d)
 	#print >> open(outfile + '_repr.txt', 'w'), repr(result)
 	#print >> open(outfile + '_str.txt', 'w'), str(result)
 	#print >> open(outfile + '.txt', 'w'), result
