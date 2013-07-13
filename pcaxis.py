@@ -14,71 +14,6 @@ import codecs
 import pyparsing
 from pyparsing import Keyword, Word, alphas, nums, alphanums, Regex, Literal, OneOrMore, Suppress, Group, Dict, Optional, White
 
-def parseDataLine(line, struct_len):
-	dline2 = []
-	
-	total = 1
-	for i in struct_len:
-		total = total * i
-	assert total == len(line), 'Line has extra elements?'
-	
-	struct2 = list(reversed(struct_len))
-	
-	def divide(elements, substruct):
-		
-		if len(substruct) == 1:
-			yield elements
-		else:
-			n = float(len(elements)) / substruct[0]
-			assert int(n) == n, 'Should be integer'
-			n = int(n)
-			for i in xrange(substruct[0]):
-				yield elements[i*n:(i+1)*n]
-		
-	
-	return list(divide(line, struct2))
-
-def parseData(d, structure):
-	lines = []
-	cur = 0
-	total = len(d)
-	
-	#print structure
-	struct_len = [len(i) for i in structure]
-	struct_len.reverse()
-	
-	data_array = []
-	dline = []
-	while cur < total:
-		#print cur
-		if d[cur] == '"':
-			next = cur + 1
-			while next < total and d[next] != '"':
-				next += 1
-			dline.append(d[cur+1:next])
-			cur = next + 1 + 1
-		elif d[cur] == " ":
-			#pass
-			cur += 1
-		elif d[cur] in '0123456789.-':
-			next = cur
-			while next < total and d[next] in '0123456789.-':
-				next += 1
-			dline.append(float(d[cur:next]))
-			cur = next + 1
-			#print dline[-1]
-		elif d[cur] in '\r\n':
-			while d[cur] in '\r\n':
-				cur += 1
-			#print dline
-			# parse dline
-			
-			dline2 = parseDataLine(dline, struct_len)
-			
-			data_array.append(dline2)
-			dline = []
-	return data_array
-
 NEWLINE = Literal("\n") | Literal("\r\n")
 EQUAL = Suppress(Literal('='))
 QUOTE = Suppress(Literal('"'))
@@ -204,6 +139,70 @@ pcaxis_parser = OneOrMore(
 	)
 
 
+def parseDataLine(line, struct_len):
+	dline2 = []
+	
+	total = 1
+	for i in struct_len:
+		total = total * i
+	assert total == len(line), 'Line length does not match?'
+	
+	struct2 = list(reversed(struct_len))
+	
+	def divide(elements, substruct):
+		
+		if len(substruct) == 1:
+			yield elements
+		else:
+			n = float(len(elements)) / substruct[0]
+			assert int(n) == n, 'Should be integer'
+			n = int(n)
+			for i in xrange(substruct[0]):
+				yield elements[i*n:(i+1)*n]
+		
+	
+	return list(divide(line, struct2))
+
+def parseData(d, structure):
+	lines = []
+	cur = 0
+	total = len(d)
+	
+	#print structure
+	struct_len = [len(i) for i in structure]
+	struct_len.reverse()
+	
+	data_array = []
+	dline = []
+	while cur < total:
+		#print cur
+		if d[cur] == '"':
+			next = cur + 1
+			while next < total and d[next] != '"':
+				next += 1
+			dline.append(d[cur+1:next])
+			cur = next + 1 + 1
+		elif d[cur] == " ":
+			#pass
+			cur += 1
+		elif d[cur] in '0123456789.-':
+			next = cur
+			while next < total and d[next] in '0123456789.-':
+				next += 1
+			dline.append(float(d[cur:next]))
+			cur = next + 1
+			#print dline[-1]
+		elif d[cur] in '\r\n':
+			while d[cur] in '\r\n':
+				cur += 1
+			#print dline
+			# parse dline
+			
+			dline2 = parseDataLine(dline, struct_len)
+			data_array.append(dline2)
+			dline = []
+	return data_array
+
 def parsePX(data, encoding=None):
     parseresults = pcaxis_parser.parseString(data)
 
@@ -218,7 +217,6 @@ def parsePX(data, encoding=None):
                     raise ValueError('Invalid encoding, please set charset manually by passing encoding parameter to parsePX', encoding)
 
     parsed_data = {}
-    structure = []
     for item in parseresults:
         key = item[0]
         if key in ['LANGUAGE', 'CHARSET', 'AXIS-VERSION', 'CREATION-DATE',
@@ -230,20 +228,29 @@ def parsePX(data, encoding=None):
             parsed_data[key] = item[1].decode(encoding)
         elif key in ['DECIMALS']:
             parsed_data[key] = item[1]
+        elif key in ['HEADING']:
+            parsed_data[key] = item[1:]
         elif key in ['CODES']:
             codes = parsed_data.setdefault(key, {})
-            structure.append(tuple(item[2]))
             codes[item[1]] = tuple(item[2])
+            #print item
         elif key in ['VALUES']:
             codes = parsed_data.setdefault(key, {})
             codes[item[1]] = [i.decode(encoding) for i in tuple(item[2])]
+            #print item
         elif key in ['NOTEX', 'NOTE']:
             parsed_data[key] = ''.join(item[1:])
         elif key == 'DATA':
+            
+            structure = []
+            for k in parsed_data['HEADING']:
+                nexts = parsed_data['CODES'].get(k, parsed_data['VALUES'].get(k))
+                structure.append(nexts)
             pdata = parseData(item[1], structure)
             #print pdata
             parsed_data[key] = pdata
         else:
+            print item
             print item[0], len(item)
         
     
