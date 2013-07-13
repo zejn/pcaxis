@@ -9,6 +9,8 @@ pyparsing>=1.5.2
 Simple example
 --------------
 
+A simple example::
+
   import pcaxis
   data = pcaxis.parsePX(open('test.px').read(), encoding='utf-8')
   print data['TITLE']
